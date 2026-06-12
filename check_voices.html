@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>语音诊断</title>
+<style>
+body { font-family: 'Segoe UI', sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
+h1 { color: #fbbf24; }
+.pass { color: #4ade80; }
+.fail { color: #f87171; }
+.warn { color: #fbbf24; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0; }
+th, td { border: 1px solid #333; padding: 8px 12px; text-align: left; font-size: 14px; }
+th { background: #2a2a4a; }
+.en { background: #1a3a1a; }
+.zh { background: #3a2a1a; }
+.test-btn { padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 8px 8px 8px 0; border-radius: 6px; border: none; }
+#result { margin-top: 16px; padding: 16px; background: #2a2a4a; border-radius: 8px; white-space: pre-wrap; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>🔊 语音包诊断 Voice Pack Diagnostics</h1>
+
+<div id="api-check"></div>
+<div id="voice-count"></div>
+
+<button class="test-btn" onclick="loadVoices()" style="background:#fbbf24;color:#000;font-weight:600">1️⃣ 加载语音 Load Voices</button>
+<button class="test-btn" onclick="testSpeak()" style="background:#4ade80;color:#000;font-weight:600">2️⃣ 测试发音 Test Speak</button>
+<button class="test-btn" onclick="testSpeakGB()" style="background:#60a5fa;color:#000;font-weight:600">3️⃣ 测试英式 Test GB</button>
+<button class="test-btn" onclick="testSpeakUS()" style="background:#c084fc;color:#000;font-weight:600">4️⃣ 测试美式 Test US</button>
+
+<div id="result">点击上方按钮开始诊断...</div>
+
+<table>
+<thead><tr><th>#</th><th>Name</th><th>Lang</th><th>Local</th><th>Default</th><th>Type</th></tr></thead>
+<tbody id="voice-table"></tbody>
+</table>
+
+<div id="install-help" hidden>
+<h2 style="color:#fbbf24">需要安装英语语音包</h2>
+<p><strong>Windows 11 安装步骤：</strong></p>
+<ol>
+<li>打开 <strong>设置 → 时间和语言 → 语言和区域</strong></li>
+<li>点击 <strong>添加语言</strong>，搜索 <strong>English</strong></li>
+<li>选择 <strong>English (United States)</strong> 或 <strong>English (United Kingdom)</strong></li>
+<li>安装后点该语言 → <strong>语言选项</strong> → 下载 <strong>语音</strong></li>
+<li><strong>重启浏览器</strong>后回来再测试</li>
+</ol>
+<p style="color:#f87171">或者：设置 → 时间和语言 → 语音 → 管理语音 → 添加语音 → English</p>
+</div>
+
+<script>
+const result = document.getElementById('result');
+const voiceTable = document.getElementById('voice-table');
+let allVoices = [];
+
+function checkApi() {
+  const el = document.getElementById('api-check');
+  if (!window.speechSynthesis) {
+    el.innerHTML = '<p class="fail">❌ speechSynthesis API 不可用</p>';
+    return false;
+  }
+  el.innerHTML = '<p class="pass">✅ speechSynthesis API 可用</p>';
+  return true;
+}
+
+function loadVoices() {
+  if (!checkApi()) return;
+  result.textContent = '正在加载语音...\n';
+
+  const tryLoad = () => {
+    allVoices = window.speechSynthesis.getVoices();
+    if (allVoices.length === 0) {
+      result.textContent += 'getVoices() 返回空，等待...\n';
+      setTimeout(tryLoad, 500);
+      return;
+    }
+
+    result.textContent += `\n找到 ${allVoices.length} 个语音：\n`;
+
+    const enVoices = allVoices.filter(v => v.lang && v.lang.startsWith('en'));
+    const zhVoices = allVoices.filter(v => v.lang && v.lang.startsWith('zh'));
+
+    result.textContent += `英语语音: ${enVoices.length} 个\n`;
+    result.textContent += `中文语音: ${zhVoices.length} 个\n`;
+
+    if (enVoices.length === 0) {
+      result.textContent += '\n❌ 没有找到英语语音！需要安装英语语音包。\n';
+      document.getElementById('install-help').hidden = false;
+    } else {
+      result.textContent += '\n✅ 有英语语音，TTS 应该可以工作。\n';
+      document.getElementById('install-help').hidden = true;
+    }
+
+    // Render table
+    voiceTable.innerHTML = allVoices.map((v, i) => {
+      const cls = v.lang && v.lang.startsWith('en') ? 'en' : (v.lang && v.lang.startsWith('zh') ? 'zh' : '');
+      return `<tr class="${cls}">
+        <td>${i+1}</td>
+        <td>${v.name}</td>
+        <td>${v.lang}</td>
+        <td>${v.localService ? '✅' : '❌'}</td>
+        <td>${v.default ? '⭐' : ''}</td>
+        <td>${v.voiceURI}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('voice-count').innerHTML =
+      `<p>总计: <strong>${allVoices.length}</strong> | 英语: <strong class="${enVoices.length ? 'pass' : 'fail'}">${enVoices.length}</strong> | 中文: <strong>${zhVoices.length}</strong></p>`;
+  };
+
+  window.speechSynthesis.onvoiceschanged = tryLoad;
+  tryLoad();
+  // Chrome needs multiple attempts
+  setTimeout(tryLoad, 300);
+  setTimeout(tryLoad, 1000);
+  setTimeout(tryLoad, 2000);
+}
+
+function doSpeak(text, lang) {
+  if (!window.speechSynthesis) { result.textContent = 'speechSynthesis 不可用'; return; }
+  result.textContent = `尝试朗读: "${text}"\n语言: ${lang || 'default'}\n`;
+
+  window.speechSynthesis.cancel();
+
+  const u = new SpeechSynthesisUtterance(text);
+
+  if (lang) {
+    const prefix = lang.split('-')[0];
+    const candidates = allVoices.filter(v => v.lang === lang || v.lang.startsWith(prefix));
+    result.textContent += `匹配语音: ${candidates.map(v => v.name + '(' + v.lang + ')').join(', ') || '无'}\n`;
+
+    const voice = candidates.find(v => v.localService) || candidates[0];
+    if (voice) {
+      u.voice = voice;
+      u.lang = voice.lang;
+      result.textContent += `使用语音: ${voice.name} (${voice.lang})\n`;
+    } else {
+      result.textContent += `⚠️ 没有找到 ${lang} 语音，使用默认\n`;
+    }
+  }
+
+  u.rate = 0.85;
+  u.pitch = 1;
+
+  u.onstart = () => {
+    result.textContent += '🔊 开始播放...\n';
+  };
+  u.onend = () => {
+    result.textContent += '✅ 播放完成\n';
+  };
+  u.onerror = (e) => {
+    result.textContent += `❌ 错误: ${e.error || JSON.stringify(e)}\n`;
+  };
+
+  try {
+    window.speechSynthesis.speak(u);
+    result.textContent += '已调用 speak()\n';
+
+    // Chrome workaround
+    const resumeInterval = setInterval(() => {
+      if (window.speechSynthesis.paused) {
+        result.textContent += '[Chrome workaround: resume]\n';
+        window.speechSynthesis.resume();
+      }
+      if (!window.speechSynthesis.speaking) {
+        clearInterval(resumeInterval);
+      }
+    }, 3000);
+    setTimeout(() => clearInterval(resumeInterval), 15000);
+  } catch(e) {
+    result.textContent += `❌ speak() 异常: ${e.message}\n`;
+  }
+}
+
+function testSpeak() { doSpeak('Hello, this is a test.', null); }
+function testSpeakGB() { doSpeak('Hello, this is a test.', 'en-GB'); }
+function testSpeakUS() { doSpeak('Hello, this is a test.', 'en-US'); }
+
+// Auto-load
+checkApi();
+</script>
+</body>
+</html>

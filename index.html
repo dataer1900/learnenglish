@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ogden's Basic English · 850 词学习手册</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css?v=2">
+</head>
+<body>
+
+<header class="hero">
+  <h1>Ogden's <em>Basic</em> English</h1>
+  <div class="subtitle">850 词学习手册 · 中英双语 · 精炼版</div>
+  <div class="meta">A controlled language designed by C.K. Ogden · 1930</div>
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-item"><span class="stat-num" id="stat-total">850</span><span class="stat-label">总词数 Total</span></div>
+    <div class="stat-item"><span class="stat-num stat-known" id="stat-known">0</span><span class="stat-label">已认识 Known</span></div>
+    <div class="stat-item"><span class="stat-num stat-unknown" id="stat-unknown">0</span><span class="stat-label">待练习 Unknown</span></div>
+    <div class="stat-progress-wrap"><div class="stat-progress"><span id="stat-progress-bar"></span></div><span class="stat-pct" id="stat-pct">0%</span></div>
+  </div>
+</header>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="q" type="text" placeholder="搜索单词、释义或例句 Search words..." autocomplete="off">
+      <kbd>/</kbd>
+    </div>
+    <div class="pills" id="pills"></div>
+    <div class="audio-toggle" id="audio-toggle" title="发音源">
+      <button data-src="uk" class="active">UK 英式</button>
+      <button data-src="us">US 美式</button>
+    </div>
+    <button class="flash-btn" id="flash-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="14" height="16" rx="2"/><path d="M8 8h6"/><path d="M8 12h6"/><path d="M8 16h4"/><path d="M18 8l2 1v9a2 2 0 0 1-2 2"/></svg>
+      卡片练习 Flash Cards
+    </button>
+    <button class="vocab-btn" id="vocab-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      生词小短文
+      <span class="vocab-badge" id="vocab-badge">0</span>
+    </button>
+  </div>
+</nav>
+
+<main>
+  <div id="sections"></div>
+  <div class="empty" id="empty">没找到匹配的词。换个词试试? No matching words found.</div>
+</main>
+
+<div id="flash-overlay" class="flash-overlay" hidden>
+  <div class="flash-topbar">
+    <div class="flash-topbar-left">
+      <span class="flash-progress" id="flash-progress">1 / 850</span>
+      <span class="flash-task-meta" id="flash-task-meta">Today's task · 0 words</span>
+      <div class="mode-pills" id="mode-pills">
+        <button class="mode-pill active" data-mode="browse">浏览 Browse</button>
+        <button class="mode-pill" data-mode="spell">拼写 Spell</button>
+        <button class="mode-pill" data-mode="choice">四选一 Choice</button>
+      </div>
+    </div>
+    <div class="flash-topbar-btns">
+      <button id="flash-unknown-only-btn" title="仅练习标记为不认识的词">
+        仅生词 Unknown Only
+      </button>
+      <button id="flash-auto-btn" class="active" aria-pressed="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        自动发音 Auto Speak
+      </button>
+      <button id="flash-shuffle-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="m4 4 5 5"/></svg>
+        打乱顺序 Shuffle
+      </button>
+      <button class="flash-close-btn" id="flash-close-btn">✕ 退出 Exit</button>
+    </div>
+  </div>
+  <div class="flash-stage">
+    <div class="flash-card-wrap" id="flash-card-wrap">
+      <div class="flash-card-inner">
+        <div class="flash-face flash-front">
+          <button class="flash-speak-front" id="fc-speak-btn" aria-label="发音">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+          </button>
+          <button class="flash-word-big speak-text" id="fc-word" data-text="" data-rate="0.85" aria-label="读单词">—</button>
+          <div class="flash-front-ipa" id="fc-ipa"></div>
+          <div class="flash-cat-badge" id="fc-cat"></div>
+          <button class="flash-flip-btn" type="button">查看释义 Show Answer</button>
+        </div>
+        <div class="flash-face flash-back" id="fc-back"></div>
+      </div>
+    </div>
+    <!-- Practice area (spell / choice) -->
+    <div class="practice-area" id="practice-area" hidden>
+      <div class="practice-content" id="practice-content"></div>
+      <div class="practice-feedback" id="practice-feedback"></div>
+    </div>
+  </div>
+  <div class="flash-mark-row" id="flash-mark-row">
+    <button class="mark-btn mark-known" id="mark-known-btn">认识 ✓ Know</button>
+    <button class="mark-btn mark-unknown" id="mark-unknown-btn">不认识 ✗ Don't Know</button>
+  </div>
+  <div class="flash-nav">
+    <button class="flash-nav-btn" id="flash-prev">← 上一个 Prev</button>
+    <span class="flash-counter" id="flash-counter">1 / 850</span>
+    <button class="flash-nav-btn" id="flash-next">下一个 Next →</button>
+  </div>
+</div>
+
+<div id="article-overlay" class="article-overlay" hidden>
+  <div class="article-topbar">
+    <div class="article-topbar-left">
+      <h2 class="article-title">Simple Articles</h2>
+      <span class="article-meta" id="article-meta">0 unknown words</span>
+    </div>
+    <div class="article-topbar-right">
+      <div class="article-page-nav">
+        <button class="article-page-btn" id="article-prev-btn" type="button">Prev</button>
+        <span class="article-page-indicator" id="article-page-indicator">Page 1 / 1</span>
+        <button class="article-page-btn" id="article-next-btn" type="button">Next</button>
+      </div>
+      <button class="article-close-btn" id="article-close-btn">✕ Close</button>
+    </div>
+  </div>
+  <div class="article-body" id="article-body"></div>
+  <div class="article-actions">
+    <button class="article-action-btn" id="article-auto-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+      Auto Review
+    </button>
+    <button class="article-action-btn" id="article-use-selected-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M20 6L9 17l-5-5"/></svg>
+      Use Selected
+    </button>
+    <button class="article-action-btn" id="article-regen-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+      Regenerate
+    </button>
+    <button class="article-action-btn" id="article-clear-selected-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+      Clear Selected
+    </button>
+    <button class="article-action-btn" id="article-copy-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      Copy All
+    </button>
+    <button class="article-action-btn" id="article-export-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export TXT
+    </button>
+  </div>
+</div>
+
+<footer>
+  数据来源 Data Source: <a href="https://en.wikipedia.org/wiki/Basic_English" target="_blank" rel="noopener">Ogden's Basic English</a> · 850 核心词 Core Words
+</footer>
+
+<script src="./data.js"></script>
+<script src="./script.js?v=23"></script>
+</body>
+</html>
