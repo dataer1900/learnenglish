@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=7">
+  <link rel="stylesheet" href="./style.css?v=11">
 </head>
 <body>
 
@@ -30,7 +30,7 @@
       <span id="review-summary">今日复习 0 · 下次 暂无</span>
       <div class="review-actions">
         <button id="review-start-btn" type="button">今日学习 Daily</button>
-        <button id="export-record-btn" type="button">导出记录 Export</button>
+        <button id="export-record-btn" type="button">导出 Export</button>
       </div>
     </div>
     <div class="review-bars" id="review-bars" aria-label="复习曲线"></div>
@@ -164,11 +164,42 @@
   </div>
 </div>
 
+<div id="wordbook-overlay" class="wordbook-overlay" hidden>
+  <div class="wordbook-panel" role="dialog" aria-modal="true" aria-labelledby="wordbook-title">
+    <div class="wordbook-topbar">
+      <div>
+        <h2 class="wordbook-title" id="wordbook-title">词本 Wordbook</h2>
+        <span class="wordbook-meta" id="wordbook-meta">0 words</span>
+      </div>
+      <button class="wordbook-close-btn" id="wordbook-close-btn" type="button">✕ Close</button>
+    </div>
+    <div class="wordbook-tools">
+      <input id="wordbook-search" class="wordbook-search" type="search" placeholder="搜索词本 Search..." autocomplete="off">
+      <div class="wordbook-tabs" id="wordbook-tabs">
+        <button class="wordbook-tab active" data-filter="due" type="button">今日复习 <span id="wordbook-count-due">0</span></button>
+        <button class="wordbook-tab" data-filter="all" type="button">全部 <span id="wordbook-count-all">0</span></button>
+        <button class="wordbook-tab" data-filter="unknown" type="button">生词 <span id="wordbook-count-unknown">0</span></button>
+        <button class="wordbook-tab" data-filter="weak" type="button">错词 <span id="wordbook-count-weak">0</span></button>
+        <button class="wordbook-tab" data-filter="mastered" type="button">已掌握 <span id="wordbook-count-mastered">0</span></button>
+      </div>
+    </div>
+    <div class="wordbook-list" id="wordbook-list"></div>
+    <div class="wordbook-empty" id="wordbook-empty" hidden>暂无匹配词条</div>
+  </div>
+</div>
+
+<nav class="app-dock" aria-label="固定学习导航">
+  <button id="dock-today-btn" type="button"><span>今日</span><small>Daily</small></button>
+  <button id="dock-wordbook-btn" type="button"><span>词本</span><small>Words</small></button>
+  <button id="dock-article-btn" type="button"><span>短文</span><small>Article</small></button>
+  <button id="dock-export-btn" type="button"><span>导出</span><small>Export</small></button>
+</nav>
+
 <footer>
   数据来源 Data Source: <a href="https://en.wikipedia.org/wiki/Basic_English" target="_blank" rel="noopener">Ogden's Basic English</a> · 850 核心词 Core Words
 </footer>
 
 <script src="./data.js"></script>
-<script src="./script.js?v=28"></script>
+<script src="./script.js?v=31"></script>
 </body>
 </html>

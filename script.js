@@ -486,12 +486,12 @@ function buildWordTable(rows, emptyText = '暂无') {
   if (!rows.length) return `${emptyText}\n`;
   const header = '| 单词 | 释义 | 状态 | 掌握度 | 学习次数 | 正确/错误 | 下次复习 |\n|---|---|---|---:|---:|---:|---|\n';
   const body = rows.map(row =>
-    `| ${escapeMarkdownCell(row.word)} | ${escapeMarkdownCell(row.zh)} | ${escapeMarkdownCell(row.status)} | ${row.masteryScore} | ${row.seen} | ${row.correct}/${row.wrong} | ${escapeMarkdownCell(formatExportReviewTime(row.nextReviewAt))} |`
+    `| ${escapeMarkdownCell(row.word)} | ${escapeMarkdownCell(row.zh)} | ${escapeMarkdownCell(getWordbookStatusText(row))} | ${row.masteryScore} | ${row.seen} | ${row.correct}/${row.wrong} | ${escapeMarkdownCell(formatExportReviewTime(row.nextReviewAt))} |`
   ).join('\n');
   return `${header}${body}\n`;
 }
 
-function buildLearningRecordMarkdown() {
+function getLearningRecordData() {
   const rows = getLearningRecordRows();
   const activity = getLearningActivityMetrics();
   const review = getReviewMetrics();
@@ -513,9 +513,24 @@ function buildLearningRecordMarkdown() {
     .sort((a, b) => a.nextReviewAt - b.nextReviewAt);
   const recentActivity = activity.recentDates.slice(0, 30);
 
+  return {
+    rows,
+    activity,
+    review,
+    total,
+    unknownCount,
+    masteredRows,
+    unknownRows,
+    weakRows,
+    upcomingRows,
+    recentActivity,
+  };
+}
+
+function buildOverviewMarkdown(data) {
+  const { activity, review, total, unknownCount, masteredRows } = data;
   let md = `# Ogden Basic English 学习记录\n\n`;
   md += `导出时间：${formatExportDateTime()}\n\n`;
-  md += `## 概览\n\n`;
   md += `| 指标 | 数值 |\n|---|---:|\n`;
   md += `| 总词数 | ${total} |\n`;
   md += `| 已认识 | ${total - unknownCount} |\n`;
@@ -527,29 +542,50 @@ function buildLearningRecordMarkdown() {
   md += `| 最佳连续天数 | ${activity.bestStreak} |\n`;
   md += `| 累计学习动作 | ${activity.totalStudyEvents} |\n`;
   md += `| 有学习记录的日期 | ${activity.activeDays} |\n\n`;
-
-  md += `## 最近学习日期\n\n`;
-  if (recentActivity.length === 0) {
-    md += `暂无\n\n`;
-  } else {
-    md += `| 日期 | 学习次数 |\n|---|---:|\n`;
-    md += recentActivity.map(([date, count]) => `| ${date} | ${count} |`).join('\n') + '\n\n';
-  }
-
-  md += `## 待练习 / 生词\n\n`;
-  md += buildWordTable(unknownRows, '暂无生词');
-  md += `\n## 薄弱词\n\n`;
-  md += buildWordTable(weakRows, '暂无薄弱词');
-  md += `\n## 已掌握\n\n`;
-  md += buildWordTable(masteredRows, '暂无已掌握词');
-  md += `\n## 未来复习安排\n\n`;
-  md += buildWordTable(upcomingRows, '暂无未来复习安排');
-
   return md;
+}
+
+function buildRecentActivityMarkdown(recentActivity) {
+  let md = `# 最近学习日期\n\n`;
+  if (recentActivity.length === 0) return `${md}暂无\n`;
+  md += `| 日期 | 学习次数 |\n|---|---:|\n`;
+  md += recentActivity.map(([date, count]) => `| ${date} | ${count} |`).join('\n') + '\n';
+  return md;
+}
+
+function buildWordListMarkdown(title, rows, emptyText) {
+  return `# ${title}\n\n${buildWordTable(rows, emptyText)}`;
+}
+
+function buildLearningRecordFiles() {
+  const data = getLearningRecordData();
+  const index = `# Ogden Basic English 学习记录\n\n` +
+    `导出时间：${formatExportDateTime()}\n\n` +
+    `## 文件\n\n` +
+    `- [概览](01-overview.md)\n` +
+    `- [最近学习日期](02-recent-activity.md)\n` +
+    `- [生词](words/unknown.md)\n` +
+    `- [薄弱词](words/weak.md)\n` +
+    `- [已掌握](words/mastered.md)\n` +
+    `- [未来复习安排](review/upcoming.md)\n`;
+
+  return [
+    { path: '00-index.md', content: index },
+    { path: '01-overview.md', content: buildOverviewMarkdown(data) },
+    { path: '02-recent-activity.md', content: buildRecentActivityMarkdown(data.recentActivity) },
+    { path: 'words/unknown.md', content: buildWordListMarkdown('待练习 / 生词', data.unknownRows, '暂无生词') },
+    { path: 'words/weak.md', content: buildWordListMarkdown('薄弱词', data.weakRows, '暂无薄弱词') },
+    { path: 'words/mastered.md', content: buildWordListMarkdown('已掌握', data.masteredRows, '暂无已掌握词') },
+    { path: 'review/upcoming.md', content: buildWordListMarkdown('未来复习安排', data.upcomingRows, '暂无未来复习安排') },
+  ];
 }
 
 function downloadTextFile(filename, text, type = 'text/plain;charset=utf-8') {
   const blob = new Blob([text], { type });
+  downloadBlobFile(filename, blob);
+}
+
+function downloadBlobFile(filename, blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -558,9 +594,205 @@ function downloadTextFile(filename, text, type = 'text/plain;charset=utf-8') {
   URL.revokeObjectURL(url);
 }
 
-function exportLearningRecord() {
-  const text = buildLearningRecordMarkdown();
-  downloadTextFile(`ogden-learning-record-${getLocalDateKey()}.md`, text, 'text/markdown;charset=utf-8');
+function showAppToast(message, timeout = 3200) {
+  const toast = document.createElement('div');
+  toast.className = 'tts-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 400);
+  }, timeout);
+}
+
+async function writeMarkdownFile(dirHandle, pathParts, content) {
+  const [first, ...rest] = pathParts;
+  if (rest.length === 0) {
+    const fileHandle = await dirHandle.getFileHandle(first, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(content);
+    await writable.close();
+    return;
+  }
+
+  const nextDir = await dirHandle.getDirectoryHandle(first, { create: true });
+  await writeMarkdownFile(nextDir, rest, content);
+}
+
+async function exportLearningRecordToFolder(files, folderName) {
+  const root = await window.showDirectoryPicker({ mode: 'readwrite' });
+  const exportDir = await root.getDirectoryHandle(folderName, { create: true });
+  for (const file of files) {
+    await writeMarkdownFile(exportDir, file.path.split('/'), file.content);
+  }
+}
+
+function buildCombinedLearningRecordMarkdown(files) {
+  return files.map(file => `<!-- ${file.path} -->\n\n${file.content.trim()}\n`).join('\n---\n\n');
+}
+
+async function exportLearningRecord() {
+  const files = buildLearningRecordFiles();
+  const folderName = `ogden-learning-record-${getLocalDateKey()}`;
+
+  if ('showDirectoryPicker' in window) {
+    try {
+      await exportLearningRecordToFolder(files, folderName);
+      showAppToast(`已导出到文件夹：${folderName}`);
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      console.warn('Folder export failed, falling back to markdown download.', err);
+    }
+  }
+
+  downloadTextFile(
+    `${folderName}.md`,
+    buildCombinedLearningRecordMarkdown(files),
+    'text/markdown;charset=utf-8'
+  );
+  showAppToast('浏览器不支持文件夹导出，已改为单个 Markdown 下载。');
+}
+
+let wordbookFilter = 'due';
+let wordbookQuery = '';
+
+function getWordbookStatusText(row) {
+  if (row.isUnknown) return '生词';
+  const labels = {
+    new: '新词',
+    known: '认识',
+    learning: '学习中',
+    familiar: '熟悉',
+    mastered: '已掌握',
+  };
+  return labels[row.status] || row.status || '新词';
+}
+
+function isWordbookDue(row) {
+  const now = Date.now();
+  if (row.nextReviewAt) return row.nextReviewAt <= now;
+  return row.isUnknown || row.status === 'learning' || row.status === 'familiar';
+}
+
+function isWordbookWeak(row) {
+  return row.isUnknown ||
+    row.wrong > row.correct ||
+    ((row.status === 'learning' || row.status === 'familiar') && row.masteryScore < 3);
+}
+
+function getWordbookCounts(rows = getLearningRecordRows()) {
+  return {
+    all: rows.length,
+    due: rows.filter(isWordbookDue).length,
+    unknown: rows.filter(row => row.isUnknown).length,
+    weak: rows.filter(isWordbookWeak).length,
+    mastered: rows.filter(row => row.status === 'mastered' || row.masteryScore >= 4).length,
+  };
+}
+
+function sortWordbookRows(rows, filterName) {
+  const list = [...rows];
+  if (filterName === 'due') {
+    return list.sort((a, b) => {
+      const ar = a.nextReviewAt || 0;
+      const br = b.nextReviewAt || 0;
+      if (ar !== br) return ar - br;
+      if (a.masteryScore !== b.masteryScore) return a.masteryScore - b.masteryScore;
+      return a.word.localeCompare(b.word);
+    });
+  }
+  if (filterName === 'weak') {
+    return list.sort((a, b) => {
+      if (b.wrong !== a.wrong) return b.wrong - a.wrong;
+      if (a.masteryScore !== b.masteryScore) return a.masteryScore - b.masteryScore;
+      return a.word.localeCompare(b.word);
+    });
+  }
+  if (filterName === 'mastered') {
+    return list.sort((a, b) => b.masteryScore - a.masteryScore || a.word.localeCompare(b.word));
+  }
+  return list.sort((a, b) => a.word.localeCompare(b.word));
+}
+
+function getFilteredWordbookRows() {
+  let rows = getLearningRecordRows();
+  if (wordbookFilter === 'due') rows = rows.filter(isWordbookDue);
+  else if (wordbookFilter === 'unknown') rows = rows.filter(row => row.isUnknown);
+  else if (wordbookFilter === 'weak') rows = rows.filter(isWordbookWeak);
+  else if (wordbookFilter === 'mastered') rows = rows.filter(row => row.status === 'mastered' || row.masteryScore >= 4);
+
+  const q = wordbookQuery.trim().toLowerCase();
+  if (q) {
+    rows = rows.filter(row =>
+      row.word.toLowerCase().includes(q) ||
+      row.zh.toLowerCase().includes(q) ||
+      row.en.toLowerCase().includes(q) ||
+      getWordbookStatusText(row).toLowerCase().includes(q)
+    );
+  }
+
+  return sortWordbookRows(rows, wordbookFilter);
+}
+
+function updateWordbookCounts() {
+  const counts = getWordbookCounts();
+  Object.entries(counts).forEach(([key, count]) => {
+    const el = document.getElementById(`wordbook-count-${key}`);
+    if (el) el.textContent = count;
+  });
+}
+
+function renderWordbook() {
+  updateWordbookCounts();
+  document.querySelectorAll('.wordbook-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.filter === wordbookFilter);
+  });
+
+  const listEl = document.getElementById('wordbook-list');
+  const emptyEl = document.getElementById('wordbook-empty');
+  const metaEl = document.getElementById('wordbook-meta');
+  if (!listEl || !emptyEl || !metaEl) return;
+
+  const rows = getFilteredWordbookRows();
+  metaEl.textContent = `${rows.length} words`;
+  emptyEl.hidden = rows.length > 0;
+  listEl.innerHTML = rows.map(row => `
+    <article class="wordbook-row">
+      <div class="wordbook-row-main">
+        <button class="wordbook-word speak-text" data-text="${escapeAttr(row.word)}" data-rate="0.85" type="button">${escapeHtml(row.word)}</button>
+        <span class="wordbook-status">${escapeHtml(getWordbookStatusText(row))}</span>
+      </div>
+      <div class="wordbook-zh">${escapeHtml(row.zh)}</div>
+      <div class="wordbook-en">${escapeHtml(row.en)}</div>
+      <div class="wordbook-row-meta">
+        <span>${escapeHtml(row.category)}</span>
+        <span>掌握度 ${row.masteryScore}</span>
+        <span>学习 ${row.seen}</span>
+        <span>错 ${row.wrong}</span>
+        <span>${row.nextReviewAt ? `复习 ${escapeHtml(formatReviewTime(row.nextReviewAt))}` : '未安排'}</span>
+      </div>
+    </article>
+  `).join('');
+}
+
+function openWordbook(filterName = wordbookFilter) {
+  wordbookFilter = filterName;
+  const overlay = document.getElementById('wordbook-overlay');
+  const search = document.getElementById('wordbook-search');
+  if (!overlay) return;
+  renderWordbook();
+  overlay.hidden = false;
+  document.body.style.overflow = 'hidden';
+  if (search) setTimeout(() => search.focus(), 0);
+}
+
+function closeWordbook() {
+  const overlay = document.getElementById('wordbook-overlay');
+  if (!overlay) return;
+  overlay.hidden = true;
+  document.body.style.overflow = '';
 }
 
 function loadArticlePackageFromStorage() {
@@ -603,6 +835,9 @@ function renderStats() {
   if (streakEl) streakEl.textContent = activityMetrics.currentStreak;
   if (todayEl) todayEl.textContent = activityMetrics.todayCount;
   renderReviewCurve(reviewMetrics);
+  updateWordbookCounts();
+  const wordbookOverlay = document.getElementById('wordbook-overlay');
+  if (wordbookOverlay && !wordbookOverlay.hidden) renderWordbook();
   updateVocabBadge();
 }
 
@@ -1633,6 +1868,40 @@ function setupEvents() {
   if (exportRecordBtn) exportRecordBtn.addEventListener('click', exportLearningRecord);
   document.getElementById('flash-close-btn').addEventListener('click', flashClose);
 
+  const dockTodayBtn = document.getElementById('dock-today-btn');
+  const dockWordbookBtn = document.getElementById('dock-wordbook-btn');
+  const dockArticleBtn = document.getElementById('dock-article-btn');
+  const dockExportBtn = document.getElementById('dock-export-btn');
+  if (dockTodayBtn) dockTodayBtn.addEventListener('click', () => flashOpen({ source: 'review' }));
+  if (dockWordbookBtn) dockWordbookBtn.addEventListener('click', () => openWordbook('due'));
+  if (dockArticleBtn) dockArticleBtn.addEventListener('click', () => openArticle('auto'));
+  if (dockExportBtn) dockExportBtn.addEventListener('click', exportLearningRecord);
+
+  const wordbookOverlay = document.getElementById('wordbook-overlay');
+  const wordbookCloseBtn = document.getElementById('wordbook-close-btn');
+  const wordbookSearch = document.getElementById('wordbook-search');
+  const wordbookTabs = document.getElementById('wordbook-tabs');
+  if (wordbookCloseBtn) wordbookCloseBtn.addEventListener('click', closeWordbook);
+  if (wordbookOverlay) {
+    wordbookOverlay.addEventListener('click', e => {
+      if (e.target === wordbookOverlay) closeWordbook();
+    });
+  }
+  if (wordbookSearch) {
+    wordbookSearch.addEventListener('input', () => {
+      wordbookQuery = wordbookSearch.value;
+      renderWordbook();
+    });
+  }
+  if (wordbookTabs) {
+    wordbookTabs.addEventListener('click', e => {
+      const tab = e.target.closest('.wordbook-tab');
+      if (!tab) return;
+      wordbookFilter = tab.dataset.filter || 'due';
+      renderWordbook();
+    });
+  }
+
   // Article overlay — 发音单独处理，直接用浏览器 speechSynthesis
   document.getElementById('vocab-btn').addEventListener('click', openArticle);
   const articleCloseBtn = document.getElementById('article-close-btn');
@@ -1833,7 +2102,10 @@ function setupEvents() {
   document.addEventListener('keydown', e => {
     const flashOverlay = document.getElementById('flash-overlay');
     const articleOverlay = document.getElementById('article-overlay');
-    if (!articleOverlay.hidden) {
+    const wordbookOverlay = document.getElementById('wordbook-overlay');
+    if (wordbookOverlay && !wordbookOverlay.hidden) {
+      if (e.key === 'Escape') closeWordbook();
+    } else if (!articleOverlay.hidden) {
       if (e.key === 'Escape') { closeArticle(); }
     } else if (!flashOverlay.hidden) {
       if (practiceMode !== 'browse' && !practiceAnswered) return; // Don't intercept when typing
