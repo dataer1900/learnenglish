@@ -795,6 +795,123 @@ function closeWordbook() {
   document.body.style.overflow = '';
 }
 
+function isCompactViewport() {
+  return window.matchMedia('(max-width: 700px)').matches;
+}
+
+function scrollToCategoryResults(cat = 'all') {
+  if (!isCompactViewport()) return;
+  requestAnimationFrame(() => {
+    const target = cat === 'all'
+      ? document.getElementById('sections')
+      : document.getElementById(`sec-${cat}`);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+}
+
+function scrollToCategoryControls() {
+  const pills = document.getElementById('pills');
+  if (pills) pills.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function openMorePanel() {
+  const overlay = document.getElementById('more-overlay');
+  if (!overlay) return;
+  overlay.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeMorePanel() {
+  const overlay = document.getElementById('more-overlay');
+  if (!overlay) return;
+  overlay.hidden = true;
+  document.body.style.overflow = '';
+}
+
+const CATEGORY_ORDER = ['op', 'gt', 'pt', 'qg', 'qo'];
+let activeCategory = 'op';
+
+function getCategoryDisplay(cat) {
+  const [en, zh] = CAT_LABELS[cat] || [cat, cat];
+  return { en, zh, count: getCategoryWordObjects(cat).length };
+}
+
+function renderCategoryGrid() {
+  const grid = document.getElementById('category-grid-panel');
+  const wordsPanel = document.getElementById('category-words-panel');
+  const meta = document.getElementById('category-meta');
+  if (!grid) return;
+  if (wordsPanel) wordsPanel.hidden = true;
+  if (grid) grid.hidden = false;
+  if (meta) meta.textContent = '选择一个分类开始刷词';
+
+  grid.innerHTML = CATEGORY_ORDER.map(cat => {
+    const item = getCategoryDisplay(cat);
+    const dueCount = getCategoryWordObjects(cat).filter(w => isWordDue(w.w)).length;
+    return `<button class="category-card-btn" type="button" data-cat="${cat}">
+      <span class="category-card-tag">${TAGS[cat]}</span>
+      <strong>${escapeHtml(item.zh.split(' · ')[0])}</strong>
+      <span>${escapeHtml(item.en)}</span>
+      <small>${item.count} words · ${dueCount} due</small>
+    </button>`;
+  }).join('');
+}
+
+function renderCategoryWords(cat) {
+  activeCategory = cat;
+  const grid = document.getElementById('category-grid-panel');
+  const wordsPanel = document.getElementById('category-words-panel');
+  const list = document.getElementById('category-word-list');
+  const meta = document.getElementById('category-meta');
+  if (!wordsPanel || !list) return;
+
+  const item = getCategoryDisplay(cat);
+  const rows = rankWordsForFlash(getCategoryWordObjects(cat));
+  if (grid) grid.hidden = true;
+  wordsPanel.hidden = false;
+  if (meta) meta.textContent = `${item.zh} · ${item.count} words`;
+
+  list.innerHTML = rows.map(w => {
+    const stats = getWordStats(w.w);
+    const row = {
+      word: w.w,
+      zh: w.zh,
+      en: w.en,
+      status: unknownWords.has(w.w) ? 'unknown' : stats.status,
+      isUnknown: unknownWords.has(w.w),
+    };
+    const status = getWordbookStatusText(row);
+    return `<article class="category-word-row">
+      <button class="category-word speak-text" type="button" data-text="${escapeAttr(w.w)}" data-rate="0.85">${escapeHtml(w.w)}</button>
+      <span class="category-word-status">${escapeHtml(status)}</span>
+      <div class="category-word-zh">${escapeHtml(w.zh)}</div>
+      <div class="category-word-en">${escapeHtml(w.en)}</div>
+    </article>`;
+  }).join('');
+}
+
+function openCategoryPanel() {
+  const overlay = document.getElementById('category-overlay');
+  if (!overlay) return;
+  renderCategoryGrid();
+  overlay.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeCategoryPanel() {
+  const overlay = document.getElementById('category-overlay');
+  if (!overlay) return;
+  overlay.hidden = true;
+  document.body.style.overflow = '';
+}
+
+function startCategoryStudy() {
+  closeCategoryPanel();
+  flashOpen({ source: 'category', category: activeCategory, restore: false });
+}
+
 function loadArticlePackageFromStorage() {
   try {
     const stored = localStorage.getItem(ARTICLE_PACKAGE_KEY);
@@ -1311,6 +1428,7 @@ let flashAutoSpeak = true;
 let practiceMode = 'browse'; // 'browse' | 'spell' | 'choice'
 let unknownOnly = false;
 let flashSourceMode = 'review';
+let flashSourceCategory = '';
 let quizScore = { correct: 0, total: 0 };
 let practiceAnswered = false;
 
@@ -1322,6 +1440,7 @@ function saveFlashSession() {
     idx: flashIdx,
     mode: practiceMode,
     source: flashSourceMode,
+    category: flashSourceCategory,
     unknownOnly,
     quizScore,
     updatedAt: Date.now(),
@@ -1345,6 +1464,7 @@ function restoreFlashSession(expectedSource) {
     flashIdx = Math.max(0, Math.min(Number(payload.idx) || 0, flashWords.length - 1));
     if (['browse', 'spell', 'choice'].includes(payload.mode)) practiceMode = payload.mode;
     flashSourceMode = payload.source || 'review';
+    flashSourceCategory = payload.category || '';
     unknownOnly = Boolean(payload.unknownOnly);
     if (payload.quizScore && typeof payload.quizScore === 'object') {
       quizScore = {
@@ -1392,12 +1512,31 @@ function getRandomFlashSource() {
   return shuffleWordList(pool.length > 0 ? pool : WORDS).slice(0, DAILY_FLASH_TARGET);
 }
 
-function getFlashSource(source = 'review') {
-  const unknownPool = WORDS.filter(w => unknownWords.has(w.w));
+function getCategoryWordObjects(cat) {
+  if (!cat || cat === 'all') return [...WORDS];
+  return WORDS.filter(w => w.c === cat);
+}
+
+function getCategoryFlashSource(cat) {
+  const pool = getCategoryWordObjects(cat);
+  if (unknownOnly) {
+    const unknownCategoryPool = pool.filter(w => unknownWords.has(w.w));
+    if (unknownCategoryPool.length > 0) return rankWordsForFlash(unknownCategoryPool);
+  }
+  return rankWordsForFlash(pool);
+}
+
+function getFlashSource(source = 'review', category = flashSourceCategory) {
+  const basePool = source === 'category' ? getCategoryWordObjects(category) : WORDS;
+  const unknownPool = basePool.filter(w => unknownWords.has(w.w));
   if (unknownOnly && unknownPool.length > 0) {
     return source === 'random'
       ? shuffleWordList(unknownPool).slice(0, DAILY_FLASH_TARGET)
       : rankWordsForFlash(unknownPool);
+  }
+
+  if (source === 'category') {
+    return getCategoryFlashSource(category);
   }
 
   if (source === 'random') {
@@ -1473,7 +1612,12 @@ function flashRender(opts) {
     const status = getWordStatusLabel(w.w);
     const statusText = status === 'mastered' ? 'Mastered' : status === 'familiar' ? 'Familiar' : status === 'learning' ? 'Learning' : 'New';
     const summary = getFlashTaskSummary(flashWords);
-    const sourceText = flashSourceMode === 'random' ? 'Random task' : 'Daily task';
+    const categoryName = flashSourceCategory && CAT_LABELS[flashSourceCategory] ? CAT_LABELS[flashSourceCategory][0] : '';
+    const sourceText = flashSourceMode === 'category'
+      ? `${categoryName || 'Category'} task`
+      : flashSourceMode === 'random'
+        ? 'Random task'
+        : 'Daily task';
     taskMetaEl.textContent = `${sourceText} · ${flashWords.length} words · ${summary.newCount} new · ${summary.reviewCount} review · ${statusText}`;
   }
 
@@ -1675,6 +1819,12 @@ function flashSpeakCurrent() {
   speak(w.w, 0.85, document.getElementById('fc-speak-btn'));
 }
 
+function updateAudioSourceButtons() {
+  document.querySelectorAll('.audio-toggle button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.src === audioSource);
+  });
+}
+
 function updateFlashAutoBtn() {
   const btn = document.getElementById('flash-auto-btn');
   btn.classList.toggle('active', flashAutoSpeak);
@@ -1689,12 +1839,14 @@ function updateUnknownOnlyBtn() {
 function flashOpen(options = {}) {
   const config = typeof options === 'string' ? { mode: options } : options;
   const source = config.source || 'review';
+  const category = config.category || '';
   const shouldRestore = config.restore !== false && source === 'review' && !config.mode;
   if (config.mode) practiceMode = config.mode;
   const restored = shouldRestore && restoreFlashSession(source);
   if (!restored) {
     flashSourceMode = source;
-    flashWords = getFlashSource(source);
+    flashSourceCategory = source === 'category' ? category : '';
+    flashWords = getFlashSource(source, flashSourceCategory);
     flashIdx = 0;
     quizScore = { correct: 0, total: 0 };
   }
@@ -1791,14 +1943,14 @@ function setupEvents() {
     document.querySelectorAll('.pill').forEach(x => x.classList.remove('active'));
     pill.classList.add('active');
     filter();
+    scrollToCategoryResults(pill.dataset.cat || 'all');
   });
 
   // Audio toggle
   document.querySelectorAll('.audio-toggle button').forEach(b => {
     b.addEventListener('click', () => {
-      document.querySelectorAll('.audio-toggle button').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
       audioSource = b.dataset.src;
+      updateAudioSourceButtons();
       stopSpeaking();
     });
   });
@@ -1870,12 +2022,12 @@ function setupEvents() {
 
   const dockTodayBtn = document.getElementById('dock-today-btn');
   const dockWordbookBtn = document.getElementById('dock-wordbook-btn');
-  const dockArticleBtn = document.getElementById('dock-article-btn');
-  const dockExportBtn = document.getElementById('dock-export-btn');
+  const dockCategoriesBtn = document.getElementById('dock-categories-btn');
+  const dockMoreBtn = document.getElementById('dock-more-btn');
   if (dockTodayBtn) dockTodayBtn.addEventListener('click', () => flashOpen({ source: 'review' }));
   if (dockWordbookBtn) dockWordbookBtn.addEventListener('click', () => openWordbook('due'));
-  if (dockArticleBtn) dockArticleBtn.addEventListener('click', () => openArticle('auto'));
-  if (dockExportBtn) dockExportBtn.addEventListener('click', exportLearningRecord);
+  if (dockCategoriesBtn) dockCategoriesBtn.addEventListener('click', openCategoryPanel);
+  if (dockMoreBtn) dockMoreBtn.addEventListener('click', openMorePanel);
 
   const wordbookOverlay = document.getElementById('wordbook-overlay');
   const wordbookCloseBtn = document.getElementById('wordbook-close-btn');
@@ -1899,6 +2051,50 @@ function setupEvents() {
       if (!tab) return;
       wordbookFilter = tab.dataset.filter || 'due';
       renderWordbook();
+    });
+  }
+
+  const categoryOverlay = document.getElementById('category-overlay');
+  const categoryCloseBtn = document.getElementById('category-close-btn');
+  const categoryGrid = document.getElementById('category-grid-panel');
+  const categoryBackBtn = document.getElementById('category-back-btn');
+  const categoryStudyBtn = document.getElementById('category-study-btn');
+  if (categoryCloseBtn) categoryCloseBtn.addEventListener('click', closeCategoryPanel);
+  if (categoryOverlay) {
+    categoryOverlay.addEventListener('click', e => {
+      if (e.target === categoryOverlay) closeCategoryPanel();
+    });
+  }
+  if (categoryGrid) {
+    categoryGrid.addEventListener('click', e => {
+      const btn = e.target.closest('.category-card-btn');
+      if (!btn) return;
+      renderCategoryWords(btn.dataset.cat || 'op');
+    });
+  }
+  if (categoryBackBtn) categoryBackBtn.addEventListener('click', renderCategoryGrid);
+  if (categoryStudyBtn) categoryStudyBtn.addEventListener('click', startCategoryStudy);
+
+  const moreOverlay = document.getElementById('more-overlay');
+  const moreCloseBtn = document.getElementById('more-close-btn');
+  const moreArticleBtn = document.getElementById('more-article-btn');
+  const moreExportBtn = document.getElementById('more-export-btn');
+  if (moreCloseBtn) moreCloseBtn.addEventListener('click', closeMorePanel);
+  if (moreOverlay) {
+    moreOverlay.addEventListener('click', e => {
+      if (e.target === moreOverlay) closeMorePanel();
+    });
+  }
+  if (moreArticleBtn) {
+    moreArticleBtn.addEventListener('click', () => {
+      closeMorePanel();
+      openArticle('auto');
+    });
+  }
+  if (moreExportBtn) {
+    moreExportBtn.addEventListener('click', () => {
+      closeMorePanel();
+      exportLearningRecord();
     });
   }
 
@@ -2103,7 +2299,13 @@ function setupEvents() {
     const flashOverlay = document.getElementById('flash-overlay');
     const articleOverlay = document.getElementById('article-overlay');
     const wordbookOverlay = document.getElementById('wordbook-overlay');
-    if (wordbookOverlay && !wordbookOverlay.hidden) {
+    const moreOverlay = document.getElementById('more-overlay');
+    const categoryOverlay = document.getElementById('category-overlay');
+    if (moreOverlay && !moreOverlay.hidden) {
+      if (e.key === 'Escape') closeMorePanel();
+    } else if (categoryOverlay && !categoryOverlay.hidden) {
+      if (e.key === 'Escape') closeCategoryPanel();
+    } else if (wordbookOverlay && !wordbookOverlay.hidden) {
       if (e.key === 'Escape') closeWordbook();
     } else if (!articleOverlay.hidden) {
       if (e.key === 'Escape') { closeArticle(); }

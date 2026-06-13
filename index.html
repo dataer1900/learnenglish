@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=11">
+  <link rel="stylesheet" href="./style.css?v=20">
 </head>
 <body>
 
@@ -188,11 +188,51 @@
   </div>
 </div>
 
+<div id="more-overlay" class="more-overlay" hidden>
+  <div class="more-panel" role="dialog" aria-modal="true" aria-labelledby="more-title">
+    <div class="more-topbar">
+      <h2 class="more-title" id="more-title">更多 More</h2>
+      <button class="more-close-btn" id="more-close-btn" type="button">✕ Close</button>
+    </div>
+    <div class="more-section">
+      <div class="more-label">发音源 Accent</div>
+      <div class="audio-toggle more-audio-toggle" title="发音源">
+        <button data-src="uk" class="active">UK 英式</button>
+        <button data-src="us">US 美式</button>
+      </div>
+    </div>
+    <div class="more-actions">
+      <button id="more-article-btn" type="button">生词小短文 Article</button>
+      <button id="more-export-btn" type="button">导出记录 Export</button>
+    </div>
+  </div>
+</div>
+
+<div id="category-overlay" class="category-overlay" hidden>
+  <div class="category-panel" role="dialog" aria-modal="true" aria-labelledby="category-title">
+    <div class="category-topbar">
+      <div>
+        <h2 class="category-title" id="category-title">分类 Types</h2>
+        <span class="category-meta" id="category-meta">选择一个分类开始刷词</span>
+      </div>
+      <button class="category-close-btn" id="category-close-btn" type="button">✕ Close</button>
+    </div>
+    <div class="category-grid-panel" id="category-grid-panel"></div>
+    <div class="category-words-panel" id="category-words-panel" hidden>
+      <div class="category-words-head">
+        <button class="category-back-btn" id="category-back-btn" type="button">← 分类</button>
+        <button class="category-study-btn" id="category-study-btn" type="button">学习这一类</button>
+      </div>
+      <div class="category-word-list" id="category-word-list"></div>
+    </div>
+  </div>
+</div>
+
 <nav class="app-dock" aria-label="固定学习导航">
   <button id="dock-today-btn" type="button"><span>今日</span><small>Daily</small></button>
   <button id="dock-wordbook-btn" type="button"><span>词本</span><small>Words</small></button>
-  <button id="dock-article-btn" type="button"><span>短文</span><small>Article</small></button>
-  <button id="dock-export-btn" type="button"><span>导出</span><small>Export</small></button>
+  <button id="dock-categories-btn" type="button"><span>分类</span><small>Types</small></button>
+  <button id="dock-more-btn" type="button"><span>更多</span><small>More</small></button>
 </nav>
 
 <footer>
@@ -200,6 +240,6 @@
 </footer>
 
 <script src="./data.js"></script>
-<script src="./script.js?v=31"></script>
+<script src="./script.js?v=34"></script>
 </body>
 </html>
