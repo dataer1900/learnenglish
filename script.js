@@ -17,7 +17,13 @@ const ARTICLE_ENGINE_VERSION = 2;
 const ARTICLE_PACKAGE_KEY = 'ogdenArticlePackageV2';
 const ARTICLE_STATS_KEY = 'ogdenArticleWordStatsV1';
 const ARTICLE_SELECTED_WORDS_KEY = 'ogdenArticleSelectedWordsV1';
+const FLASH_SESSION_KEY = 'ogdenFlashSessionV1';
+const LEARNING_ACTIVITY_KEY = 'ogdenLearningActivityV1';
+const FLASH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WORD_BY_KEY = new Map(WORDS.map(w => [w.w, w]));
 let articleWordStats = {};
+let learningActivity = {};
 let articlePackageCache = null;
 let selectedArticleWords = new Set();
 let articleMode = 'auto';
@@ -33,13 +39,109 @@ function createDefaultWordStats() {
     flashCorrect: 0,
     flashWrong: 0,
     masteryScore: 0,
-    status: 'new', // new | learning | familiar | mastered
+    status: 'new', // new | known | learning | familiar | mastered
     nextReviewAt: 0,
   };
 }
 
 function normalizeWordStatsShape(stats) {
   return { ...createDefaultWordStats(), ...(stats || {}) };
+}
+
+function createDefaultLearningActivity() {
+  return {
+    currentStreak: 0,
+    bestStreak: 0,
+    lastStudyDate: '',
+    totalStudyEvents: 0,
+    dates: {},
+  };
+}
+
+function normalizeLearningActivityShape(activity) {
+  const base = createDefaultLearningActivity();
+  const merged = { ...base, ...(activity || {}) };
+  merged.dates = merged.dates && typeof merged.dates === 'object' ? merged.dates : {};
+  merged.currentStreak = Number(merged.currentStreak) || 0;
+  merged.bestStreak = Number(merged.bestStreak) || 0;
+  merged.totalStudyEvents = Number(merged.totalStudyEvents) || 0;
+  return merged;
+}
+
+function getLocalDateKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function dateKeyToTime(key) {
+  const [y, m, d] = String(key || '').split('-').map(Number);
+  if (!y || !m || !d) return 0;
+  return new Date(y, m - 1, d).getTime();
+}
+
+function getDateKeyDiff(fromKey, toKey) {
+  const from = dateKeyToTime(fromKey);
+  const to = dateKeyToTime(toKey);
+  if (!from || !to) return 0;
+  return Math.round((to - from) / DAY_MS);
+}
+
+function loadLearningActivity() {
+  try {
+    const stored = localStorage.getItem(LEARNING_ACTIVITY_KEY);
+    learningActivity = stored ? normalizeLearningActivityShape(JSON.parse(stored)) : createDefaultLearningActivity();
+  } catch {
+    learningActivity = createDefaultLearningActivity();
+  }
+}
+
+function saveLearningActivity() {
+  try {
+    localStorage.setItem(LEARNING_ACTIVITY_KEY, JSON.stringify(learningActivity));
+  } catch {}
+}
+
+function recordStudyActivity(count = 1) {
+  const today = getLocalDateKey();
+  learningActivity = normalizeLearningActivityShape(learningActivity);
+
+  if (learningActivity.lastStudyDate !== today) {
+    const dayDiff = getDateKeyDiff(learningActivity.lastStudyDate, today);
+    learningActivity.currentStreak = dayDiff === 1 ? learningActivity.currentStreak + 1 : 1;
+    learningActivity.lastStudyDate = today;
+  } else if (learningActivity.currentStreak < 1) {
+    learningActivity.currentStreak = 1;
+  }
+
+  learningActivity.dates[today] = (Number(learningActivity.dates[today]) || 0) + count;
+  learningActivity.totalStudyEvents += count;
+  learningActivity.bestStreak = Math.max(learningActivity.bestStreak, learningActivity.currentStreak);
+  saveLearningActivity();
+}
+
+function getLearningActivityMetrics() {
+  learningActivity = normalizeLearningActivityShape(learningActivity);
+  const today = getLocalDateKey();
+  const dayDiff = getDateKeyDiff(learningActivity.lastStudyDate, today);
+  const currentStreak = !learningActivity.lastStudyDate
+    ? 0
+    : dayDiff <= 1
+      ? learningActivity.currentStreak
+      : 0;
+  const recentDates = Object.entries(learningActivity.dates)
+    .sort(([a], [b]) => b.localeCompare(a));
+
+  return {
+    todayCount: Number(learningActivity.dates[today]) || 0,
+    currentStreak,
+    bestStreak: learningActivity.bestStreak,
+    totalStudyEvents: learningActivity.totalStudyEvents,
+    activeDays: recentDates.length,
+    lastStudyDate: learningActivity.lastStudyDate,
+    recentDates,
+  };
 }
 
 function loadUnknownWords() {
@@ -131,6 +233,7 @@ function syncWordStatus(stats, isUnknown) {
 function recordFlashOutcome(word, outcome) {
   const stats = getWordStats(word);
   const now = Date.now();
+  stats.seen += 1;
   stats.lastReviewedAt = now;
 
   if (outcome === 'correct') {
@@ -147,6 +250,7 @@ function recordFlashOutcome(word, outcome) {
 
   syncWordStatus(stats, unknownWords.has(word));
   stats.nextReviewAt = now + getReviewDelayMs(stats);
+  recordStudyActivity();
   saveArticleWordStats();
 }
 
@@ -183,9 +287,19 @@ function markWordsGenerated(words) {
 function recordWordQuizResult(word, isCorrect) {
   if (!word) return;
   const stats = getWordStats(word);
-  stats.lastReviewedAt = Date.now();
-  if (isCorrect) stats.quizCorrect += 1;
-  else stats.quizWrong += 1;
+  const now = Date.now();
+  stats.seen += 1;
+  stats.lastReviewedAt = now;
+  if (isCorrect) {
+    stats.quizCorrect += 1;
+    stats.masteryScore = Math.min(6, stats.masteryScore + 1);
+  } else {
+    stats.quizWrong += 1;
+    stats.masteryScore = Math.max(0, stats.masteryScore - 2);
+  }
+  syncWordStatus(stats, unknownWords.has(word));
+  stats.nextReviewAt = now + getReviewDelayMs(stats);
+  recordStudyActivity();
   saveArticleWordStats();
 }
 
@@ -242,6 +356,213 @@ function getFlashTaskSummary(words) {
   return { newCount, reviewCount };
 }
 
+function hasReviewMemory(word, stats) {
+  return unknownWords.has(word) ||
+    stats.seen > 0 ||
+    stats.lastReviewedAt > 0 ||
+    stats.flashCorrect > 0 ||
+    stats.flashWrong > 0 ||
+    stats.quizCorrect > 0 ||
+    stats.quizWrong > 0;
+}
+
+function getReviewMetrics() {
+  const now = Date.now();
+  const buckets = [
+    { key: 'now', label: '现在', count: 0 },
+    { key: 'day1', label: '1天', count: 0 },
+    { key: 'day3', label: '3天', count: 0 },
+    { key: 'day7', label: '7天', count: 0 },
+    { key: 'later', label: '更久', count: 0 },
+  ];
+  let learningCount = 0;
+  let masteredCount = 0;
+  let nextReviewAt = 0;
+
+  WORDS.forEach(w => {
+    const stats = getWordStats(w.w);
+    if (stats.status === 'learning' || stats.status === 'familiar') learningCount++;
+    if (stats.status === 'mastered' || stats.masteryScore >= 4) masteredCount++;
+    if (!hasReviewMemory(w.w, stats)) return;
+
+    const reviewAt = stats.nextReviewAt || (unknownWords.has(w.w) ? now : 0);
+    if (!reviewAt) return;
+
+    if (reviewAt <= now) buckets[0].count++;
+    else if (reviewAt <= now + DAY_MS) buckets[1].count++;
+    else if (reviewAt <= now + 3 * DAY_MS) buckets[2].count++;
+    else if (reviewAt <= now + 7 * DAY_MS) buckets[3].count++;
+    else buckets[4].count++;
+
+    if (reviewAt > now && (!nextReviewAt || reviewAt < nextReviewAt)) {
+      nextReviewAt = reviewAt;
+    }
+  });
+
+  return {
+    dueNow: buckets[0].count,
+    learningCount,
+    masteredCount,
+    nextReviewAt,
+    buckets,
+  };
+}
+
+function formatReviewTime(ts) {
+  if (!ts) return '暂无';
+  const now = Date.now();
+  if (ts <= now) return '现在';
+  const diff = ts - now;
+  const date = new Date(ts);
+  const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  if (diff < DAY_MS) return `今天 ${time}`;
+  if (diff < 2 * DAY_MS) return `明天 ${time}`;
+  return `${Math.ceil(diff / DAY_MS)}天后`;
+}
+
+function renderReviewCurve(metrics = getReviewMetrics()) {
+  const summaryEl = document.getElementById('review-summary');
+  const barsEl = document.getElementById('review-bars');
+  if (!summaryEl || !barsEl) return;
+
+  const activity = getLearningActivityMetrics();
+  summaryEl.textContent = `今日复习 ${metrics.dueNow} · 今日已学 ${activity.todayCount} · 连续 ${activity.currentStreak} 天 · 下次 ${formatReviewTime(metrics.nextReviewAt)}`;
+  const maxCount = Math.max(1, ...metrics.buckets.map(b => b.count));
+  barsEl.innerHTML = metrics.buckets.map(bucket => {
+    const height = bucket.count === 0 ? 6 : 10 + Math.round((bucket.count / maxCount) * 42);
+    return `<div class="review-bar" data-bucket="${bucket.key}">
+      <span class="review-bar-count">${bucket.count}</span>
+      <span class="review-bar-track"><span style="height:${height}px"></span></span>
+      <span class="review-bar-label">${bucket.label}</span>
+    </div>`;
+  }).join('');
+}
+
+function escapeMarkdownCell(value) {
+  return String(value ?? '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\|/g, '\\|')
+    .trim();
+}
+
+function formatExportDateTime(ts = Date.now()) {
+  const date = new Date(ts);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const h = String(date.getHours()).padStart(2, '0');
+  const min = String(date.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d} ${h}:${min}`;
+}
+
+function formatExportReviewTime(ts) {
+  if (!ts) return '';
+  return ts <= Date.now() ? '现在' : formatExportDateTime(ts);
+}
+
+function getLearningRecordRows() {
+  return WORDS.map(w => {
+    const stats = getWordStats(w.w);
+    const correct = stats.flashCorrect + stats.quizCorrect;
+    const wrong = stats.flashWrong + stats.quizWrong;
+    return {
+      word: w.w,
+      zh: w.zh,
+      en: w.en,
+      category: TAGS[w.c] || w.c,
+      status: unknownWords.has(w.w) ? 'unknown' : (stats.status || 'new'),
+      masteryScore: stats.masteryScore,
+      seen: stats.seen,
+      correct,
+      wrong,
+      isUnknown: unknownWords.has(w.w),
+      nextReviewAt: stats.nextReviewAt || 0,
+      lastReviewedAt: stats.lastReviewedAt || 0,
+    };
+  });
+}
+
+function buildWordTable(rows, emptyText = '暂无') {
+  if (!rows.length) return `${emptyText}\n`;
+  const header = '| 单词 | 释义 | 状态 | 掌握度 | 学习次数 | 正确/错误 | 下次复习 |\n|---|---|---|---:|---:|---:|---|\n';
+  const body = rows.map(row =>
+    `| ${escapeMarkdownCell(row.word)} | ${escapeMarkdownCell(row.zh)} | ${escapeMarkdownCell(row.status)} | ${row.masteryScore} | ${row.seen} | ${row.correct}/${row.wrong} | ${escapeMarkdownCell(formatExportReviewTime(row.nextReviewAt))} |`
+  ).join('\n');
+  return `${header}${body}\n`;
+}
+
+function buildLearningRecordMarkdown() {
+  const rows = getLearningRecordRows();
+  const activity = getLearningActivityMetrics();
+  const review = getReviewMetrics();
+  const total = WORDS.length;
+  const unknownCount = unknownWords.size;
+  const masteredRows = rows.filter(row => row.status === 'mastered' || row.masteryScore >= 4);
+  const unknownRows = rows.filter(row => row.isUnknown);
+  const weakRows = rows.filter(row =>
+    row.isUnknown ||
+    row.wrong > row.correct ||
+    ((row.status === 'learning' || row.status === 'familiar') && row.masteryScore < 3)
+  ).sort((a, b) => {
+    if (b.wrong !== a.wrong) return b.wrong - a.wrong;
+    if (a.masteryScore !== b.masteryScore) return a.masteryScore - b.masteryScore;
+    return a.word.localeCompare(b.word);
+  });
+  const upcomingRows = rows
+    .filter(row => row.nextReviewAt > Date.now())
+    .sort((a, b) => a.nextReviewAt - b.nextReviewAt);
+  const recentActivity = activity.recentDates.slice(0, 30);
+
+  let md = `# Ogden Basic English 学习记录\n\n`;
+  md += `导出时间：${formatExportDateTime()}\n\n`;
+  md += `## 概览\n\n`;
+  md += `| 指标 | 数值 |\n|---|---:|\n`;
+  md += `| 总词数 | ${total} |\n`;
+  md += `| 已认识 | ${total - unknownCount} |\n`;
+  md += `| 待练习 | ${unknownCount} |\n`;
+  md += `| 已掌握 | ${masteredRows.length} |\n`;
+  md += `| 今日复习 | ${review.dueNow} |\n`;
+  md += `| 今日已学 | ${activity.todayCount} |\n`;
+  md += `| 连续学习天数 | ${activity.currentStreak} |\n`;
+  md += `| 最佳连续天数 | ${activity.bestStreak} |\n`;
+  md += `| 累计学习动作 | ${activity.totalStudyEvents} |\n`;
+  md += `| 有学习记录的日期 | ${activity.activeDays} |\n\n`;
+
+  md += `## 最近学习日期\n\n`;
+  if (recentActivity.length === 0) {
+    md += `暂无\n\n`;
+  } else {
+    md += `| 日期 | 学习次数 |\n|---|---:|\n`;
+    md += recentActivity.map(([date, count]) => `| ${date} | ${count} |`).join('\n') + '\n\n';
+  }
+
+  md += `## 待练习 / 生词\n\n`;
+  md += buildWordTable(unknownRows, '暂无生词');
+  md += `\n## 薄弱词\n\n`;
+  md += buildWordTable(weakRows, '暂无薄弱词');
+  md += `\n## 已掌握\n\n`;
+  md += buildWordTable(masteredRows, '暂无已掌握词');
+  md += `\n## 未来复习安排\n\n`;
+  md += buildWordTable(upcomingRows, '暂无未来复习安排');
+
+  return md;
+}
+
+function downloadTextFile(filename, text, type = 'text/plain;charset=utf-8') {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportLearningRecord() {
+  const text = buildLearningRecordMarkdown();
+  downloadTextFile(`ogden-learning-record-${getLocalDateKey()}.md`, text, 'text/markdown;charset=utf-8');
+}
+
 function loadArticlePackageFromStorage() {
   try {
     const stored = localStorage.getItem(ARTICLE_PACKAGE_KEY);
@@ -266,11 +587,22 @@ function renderStats() {
   const unknown = unknownWords.size;
   const known = total - unknown;
   const pct = Math.round((known / total) * 100);
+  const reviewMetrics = getReviewMetrics();
+  const activityMetrics = getLearningActivityMetrics();
   document.getElementById('stat-total').textContent = total;
   document.getElementById('stat-known').textContent = known;
   document.getElementById('stat-unknown').textContent = unknown;
   document.getElementById('stat-pct').textContent = pct + '%';
   document.getElementById('stat-progress-bar').style.width = pct + '%';
+  const dueEl = document.getElementById('stat-due');
+  const masteredEl = document.getElementById('stat-mastered');
+  const streakEl = document.getElementById('stat-streak');
+  const todayEl = document.getElementById('stat-today');
+  if (dueEl) dueEl.textContent = reviewMetrics.dueNow;
+  if (masteredEl) masteredEl.textContent = reviewMetrics.masteredCount;
+  if (streakEl) streakEl.textContent = activityMetrics.currentStreak;
+  if (todayEl) todayEl.textContent = activityMetrics.todayCount;
+  renderReviewCurve(reviewMetrics);
   updateVocabBadge();
 }
 
@@ -743,8 +1075,57 @@ let flashIdx = 0;
 let flashAutoSpeak = true;
 let practiceMode = 'browse'; // 'browse' | 'spell' | 'choice'
 let unknownOnly = false;
+let flashSourceMode = 'review';
 let quizScore = { correct: 0, total: 0 };
 let practiceAnswered = false;
+
+function saveFlashSession() {
+  if (!flashWords.length) return;
+  const payload = {
+    version: 1,
+    words: flashWords.map(w => w.w),
+    idx: flashIdx,
+    mode: practiceMode,
+    source: flashSourceMode,
+    unknownOnly,
+    quizScore,
+    updatedAt: Date.now(),
+  };
+  try {
+    localStorage.setItem(FLASH_SESSION_KEY, JSON.stringify(payload));
+  } catch {}
+}
+
+function restoreFlashSession(expectedSource) {
+  try {
+    const stored = localStorage.getItem(FLASH_SESSION_KEY);
+    if (!stored) return false;
+    const payload = JSON.parse(stored);
+    if (!payload || payload.version !== 1) return false;
+    if (!payload.updatedAt || Date.now() - payload.updatedAt > FLASH_SESSION_TTL_MS) return false;
+    if (expectedSource && payload.source && payload.source !== expectedSource) return false;
+    const words = (payload.words || []).map(word => WORD_BY_KEY.get(word)).filter(Boolean);
+    if (!words.length) return false;
+    flashWords = words;
+    flashIdx = Math.max(0, Math.min(Number(payload.idx) || 0, flashWords.length - 1));
+    if (['browse', 'spell', 'choice'].includes(payload.mode)) practiceMode = payload.mode;
+    flashSourceMode = payload.source || 'review';
+    unknownOnly = Boolean(payload.unknownOnly);
+    if (payload.quizScore && typeof payload.quizScore === 'object') {
+      quizScore = {
+        correct: Number(payload.quizScore.correct) || 0,
+        total: Number(payload.quizScore.total) || 0,
+      };
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearFlashSession() {
+  try { localStorage.removeItem(FLASH_SESSION_KEY); } catch {}
+}
 
 function flashBuildBack(w) {
   const ipa = getIpa(w.w);
@@ -762,14 +1143,33 @@ function flashBuildBack(w) {
     <button class="flash-back-flip" type="button">回到正面 Back</button>`;
 }
 
-function getFlashSource() {
-  const now = Date.now();
-  const unknownPool = WORDS.filter(w => unknownWords.has(w.w));
+function shuffleWordList(words) {
+  const list = [...words];
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list;
+}
 
+function getRandomFlashSource() {
+  const pool = WORDS.filter(w => getWordStatusLabel(w.w) !== 'mastered');
+  return shuffleWordList(pool.length > 0 ? pool : WORDS).slice(0, DAILY_FLASH_TARGET);
+}
+
+function getFlashSource(source = 'review') {
+  const unknownPool = WORDS.filter(w => unknownWords.has(w.w));
   if (unknownOnly && unknownPool.length > 0) {
-    return rankWordsForFlash(unknownPool);
+    return source === 'random'
+      ? shuffleWordList(unknownPool).slice(0, DAILY_FLASH_TARGET)
+      : rankWordsForFlash(unknownPool);
   }
 
+  if (source === 'random') {
+    return getRandomFlashSource();
+  }
+
+  const now = Date.now();
   const dueUnknown = rankWordsForFlash(unknownPool).filter(w => isWordDue(w.w, now));
   const learningPool = WORDS.filter(w => {
     const status = getWordStatusLabel(w.w);
@@ -798,7 +1198,7 @@ function getFlashSource() {
 
 function flashRender(opts) {
   if (flashWords.length === 0) {
-    flashWords = getFlashSource();
+    flashWords = getFlashSource(flashSourceMode);
     flashIdx = 0;
   }
   const w = flashWords[flashIdx];
@@ -838,7 +1238,8 @@ function flashRender(opts) {
     const status = getWordStatusLabel(w.w);
     const statusText = status === 'mastered' ? 'Mastered' : status === 'familiar' ? 'Familiar' : status === 'learning' ? 'Learning' : 'New';
     const summary = getFlashTaskSummary(flashWords);
-    taskMetaEl.textContent = `Today's task · ${flashWords.length} words · ${summary.newCount} new · ${summary.reviewCount} review · ${statusText}`;
+    const sourceText = flashSourceMode === 'random' ? 'Random task' : 'Daily task';
+    taskMetaEl.textContent = `${sourceText} · ${flashWords.length} words · ${summary.newCount} new · ${summary.reviewCount} review · ${statusText}`;
   }
 
   // Practice modes
@@ -847,6 +1248,7 @@ function flashRender(opts) {
     cardWrap.style.display = '';
     practiceArea.hidden = true;
     markRow.style.display = '';
+    resetMarkRowState();
   } else if (practiceMode === 'spell') {
     cardWrap.style.display = 'none';
     practiceArea.hidden = false;
@@ -859,6 +1261,7 @@ function flashRender(opts) {
     renderChoiceMode(w);
   }
 
+  saveFlashSession();
   if (opts && opts.autoSpeak && flashAutoSpeak && practiceMode === 'browse') flashSpeakCurrent();
 }
 
@@ -899,6 +1302,7 @@ function checkSpellAnswer(w) {
     unknownWords.delete(w.w);
     saveUnknownWords();
     recordFlashOutcome(w.w, 'correct');
+    saveFlashSession();
     renderStats();
     speak(w.w, 0.85, null);
   } else {
@@ -907,6 +1311,7 @@ function checkSpellAnswer(w) {
     unknownWords.add(w.w);
     saveUnknownWords();
     recordFlashOutcome(w.w, 'wrong');
+    saveFlashSession();
     renderStats();
   }
   feedback.innerHTML += `<br><button class="practice-next-btn" id="practice-next-btn">下一个 Next →</button>`;
@@ -967,6 +1372,7 @@ function checkChoiceAnswer(w, btn) {
     unknownWords.delete(w.w);
     saveUnknownWords();
     recordFlashOutcome(w.w, 'correct');
+    saveFlashSession();
     renderStats();
     speak(w.w, 0.85, null);
   } else {
@@ -975,6 +1381,7 @@ function checkChoiceAnswer(w, btn) {
     unknownWords.add(w.w);
     saveUnknownWords();
     recordFlashOutcome(w.w, 'wrong');
+    saveFlashSession();
     renderStats();
   }
   feedback.innerHTML += `<br><button class="practice-next-btn" id="practice-next-btn">下一个 Next →</button>`;
@@ -987,6 +1394,7 @@ function showQuizComplete() {
   const feedback = document.getElementById('practice-feedback');
   document.getElementById('flash-card-wrap').style.display = 'none';
   document.getElementById('flash-mark-row').style.display = 'none';
+  clearFlashSession();
 
   const pct = quizScore.total > 0 ? Math.round((quizScore.correct / quizScore.total) * 100) : 0;
   const emoji = pct >= 80 ? '🎉' : pct >= 50 ? '💪' : '📖';
@@ -1006,7 +1414,7 @@ function showQuizComplete() {
 
   document.getElementById('quiz-retry-btn').addEventListener('click', () => {
     quizScore = { correct: 0, total: 0 };
-    flashWords = getFlashSource();
+    flashWords = getFlashSource(flashSourceMode);
     flashIdx = 0;
     flashRender({ autoSpeak: false });
   });
@@ -1015,7 +1423,7 @@ function showQuizComplete() {
 function flashNext() {
   if (flashIdx < flashWords.length - 1) {
     flashIdx++;
-    flashRender({ autoSpeak: false });
+    flashRender({ autoSpeak: practiceMode === 'browse' && flashAutoSpeak });
   } else {
     if (practiceMode !== 'browse') {
       showQuizComplete();
@@ -1043,11 +1451,18 @@ function updateUnknownOnlyBtn() {
   btn.classList.toggle('active', unknownOnly);
 }
 
-function flashOpen(mode) {
-  if (mode) practiceMode = mode;
-  flashWords = getFlashSource();
-  flashIdx = 0;
-  quizScore = { correct: 0, total: 0 };
+function flashOpen(options = {}) {
+  const config = typeof options === 'string' ? { mode: options } : options;
+  const source = config.source || 'review';
+  const shouldRestore = config.restore !== false && source === 'review' && !config.mode;
+  if (config.mode) practiceMode = config.mode;
+  const restored = shouldRestore && restoreFlashSession(source);
+  if (!restored) {
+    flashSourceMode = source;
+    flashWords = getFlashSource(source);
+    flashIdx = 0;
+    quizScore = { correct: 0, total: 0 };
+  }
   updateFlashAutoBtn();
   updateUnknownOnlyBtn();
   updateModePills();
@@ -1057,6 +1472,7 @@ function flashOpen(mode) {
 }
 
 function flashClose() {
+  saveFlashSession();
   document.getElementById('flash-overlay').hidden = true;
   document.body.style.overflow = '';
   stopSpeaking();
@@ -1072,9 +1488,49 @@ function updateModePills() {
 }
 
 // ====== MARK WORD ======
+function resetMarkRowState() {
+  const row = document.getElementById('flash-mark-row');
+  if (!row) return;
+  row.querySelectorAll('.mark-btn').forEach(btn => {
+    btn.disabled = false;
+    btn.hidden = false;
+  });
+  row.querySelector('.mark-result-note')?.remove();
+  row.querySelector('.mark-next-after-answer')?.remove();
+}
+
+function showMarkedAnswer(w, known) {
+  const row = document.getElementById('flash-mark-row');
+  const cardWrap = document.getElementById('flash-card-wrap');
+  if (!row || !cardWrap) return;
+
+  cardWrap.classList.add('flipped');
+  row.querySelectorAll('.mark-btn').forEach(btn => {
+    btn.disabled = true;
+    btn.hidden = true;
+  });
+
+  const note = document.createElement('div');
+  note.className = `mark-result-note ${known ? 'known' : 'unknown'}`;
+  note.innerHTML = `<strong>${known ? '已标记认识' : '已标记不认识'}</strong><span>意思：${escapeHtml(w.zh)} · ${escapeHtml(w.en)}</span>`;
+
+  const nextBtn = document.createElement('button');
+  nextBtn.className = 'mark-next-after-answer';
+  nextBtn.type = 'button';
+  nextBtn.textContent = '下一个 Next';
+  nextBtn.addEventListener('click', () => {
+    stopSpeaking();
+    flashNext();
+  });
+
+  row.append(note, nextBtn);
+}
+
 function markWord(known) {
+  if (practiceAnswered) return;
   const w = flashWords[flashIdx];
   if (!w) return;
+  practiceAnswered = true;
   if (known) {
     unknownWords.delete(w.w);
     recordFlashOutcome(w.w, 'known');
@@ -1084,7 +1540,8 @@ function markWord(known) {
   }
   saveUnknownWords();
   renderStats();
-  flashNext();
+  saveFlashSession();
+  showMarkedAnswer(w, known);
 }
 
 // ====== EVENT LISTENERS ======
@@ -1170,7 +1627,10 @@ function setupEvents() {
   });
 
   // Flash card open/close
-  document.getElementById('flash-btn').addEventListener('click', () => flashOpen());
+  const reviewStartBtn = document.getElementById('review-start-btn');
+  const exportRecordBtn = document.getElementById('export-record-btn');
+  if (reviewStartBtn) reviewStartBtn.addEventListener('click', () => flashOpen({ source: 'review' }));
+  if (exportRecordBtn) exportRecordBtn.addEventListener('click', exportLearningRecord);
   document.getElementById('flash-close-btn').addEventListener('click', flashClose);
 
   // Article overlay — 发音单独处理，直接用浏览器 speechSynthesis
@@ -1244,6 +1704,8 @@ function setupEvents() {
       }
       const quizWord = quiz.dataset.word || '';
       recordWordQuizResult(quizWord, quizBtn.dataset.correct === '1');
+      renderStats();
+      updateArticleEntryState();
       return;
     }
 
@@ -1300,7 +1762,7 @@ function setupEvents() {
   document.getElementById('flash-unknown-only-btn').addEventListener('click', () => {
     unknownOnly = !unknownOnly;
     updateUnknownOnlyBtn();
-    flashWords = getFlashSource();
+    flashWords = getFlashSource(flashSourceMode);
     flashIdx = 0;
     if (flashWords.length === 0) {
       flashWords = [...WORDS];
@@ -2040,6 +2502,7 @@ function openArticle(mode = 'auto') {
 
 // ====== INIT ======
 loadUnknownWords();
+loadLearningActivity();
 loadSelectedArticleWords();
 loadArticleWordStats();
 ensureArticlePackage(false, articleMode);

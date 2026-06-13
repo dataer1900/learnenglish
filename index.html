@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700&family=Noto+Serif+SC:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./style.css?v=2">
+  <link rel="stylesheet" href="./style.css?v=7">
 </head>
 <body>
 
@@ -19,7 +19,21 @@
     <div class="stat-item"><span class="stat-num" id="stat-total">850</span><span class="stat-label">总词数 Total</span></div>
     <div class="stat-item"><span class="stat-num stat-known" id="stat-known">0</span><span class="stat-label">已认识 Known</span></div>
     <div class="stat-item"><span class="stat-num stat-unknown" id="stat-unknown">0</span><span class="stat-label">待练习 Unknown</span></div>
+    <div class="stat-item"><span class="stat-num stat-due" id="stat-due">0</span><span class="stat-label">今日复习 Due</span></div>
+    <div class="stat-item"><span class="stat-num" id="stat-mastered">0</span><span class="stat-label">已掌握 Mastered</span></div>
+    <div class="stat-item"><span class="stat-num stat-streak" id="stat-streak">0</span><span class="stat-label">连续天数 Streak</span></div>
+    <div class="stat-item"><span class="stat-num" id="stat-today">0</span><span class="stat-label">今日已学 Today</span></div>
     <div class="stat-progress-wrap"><div class="stat-progress"><span id="stat-progress-bar"></span></div><span class="stat-pct" id="stat-pct">0%</span></div>
+  </div>
+  <div class="review-curve" id="review-curve">
+    <div class="review-curve-head">
+      <span id="review-summary">今日复习 0 · 下次 暂无</span>
+      <div class="review-actions">
+        <button id="review-start-btn" type="button">今日学习 Daily</button>
+        <button id="export-record-btn" type="button">导出记录 Export</button>
+      </div>
+    </div>
+    <div class="review-bars" id="review-bars" aria-label="复习曲线"></div>
   </div>
 </header>
 
@@ -35,10 +49,6 @@
       <button data-src="uk" class="active">UK 英式</button>
       <button data-src="us">US 美式</button>
     </div>
-    <button class="flash-btn" id="flash-btn">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="14" height="16" rx="2"/><path d="M8 8h6"/><path d="M8 12h6"/><path d="M8 16h4"/><path d="M18 8l2 1v9a2 2 0 0 1-2 2"/></svg>
-      卡片练习 Flash Cards
-    </button>
     <button class="vocab-btn" id="vocab-btn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       生词小短文
@@ -159,6 +169,6 @@
 </footer>
 
 <script src="./data.js"></script>
-<script src="./script.js?v=23"></script>
+<script src="./script.js?v=28"></script>
 </body>
 </html>
