@@ -6,3 +6,8 @@ Thumbs.db
 *.tmp
 *.temp
 *.log
+
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
