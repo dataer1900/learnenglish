@@ -217,7 +217,7 @@ function getReviewDelayMs(stats) {
   if (stats.masteryScore >= 3) return 3 * 24 * 60 * 60 * 1000;
   if (stats.masteryScore >= 2) return 24 * 60 * 60 * 1000;
   if (stats.masteryScore >= 1) return 12 * 60 * 60 * 1000;
-  return 0;
+  return 10 * 60 * 1000;
 }
 
 function syncWordStatus(stats, isUnknown) {
@@ -272,6 +272,28 @@ function rankWordsForFlash(words) {
     if (sa.lastReviewedAt !== sb.lastReviewedAt) return sa.lastReviewedAt - sb.lastReviewedAt;
     return a.w.localeCompare(b.w);
   });
+}
+
+function isMasteredForFlash(stats) {
+  return stats.status === 'mastered' || stats.masteryScore >= 4;
+}
+
+function isDailyFlashCandidate(w, now = Date.now()) {
+  const stats = getWordStats(w.w);
+  if (isMasteredForFlash(stats)) return false;
+  if (!hasReviewMemory(w.w, stats)) return true;
+  return isWordDue(w.w, now);
+}
+
+function uniqueFlashWords(words) {
+  const seen = new Set();
+  const result = [];
+  words.forEach(w => {
+    if (!w || seen.has(w.w)) return;
+    seen.add(w.w);
+    result.push(w);
+  });
+  return result;
 }
 
 function markWordsGenerated(words) {
@@ -1433,7 +1455,10 @@ let quizScore = { correct: 0, total: 0 };
 let practiceAnswered = false;
 
 function saveFlashSession() {
-  if (!flashWords.length) return;
+  if (!flashWords.length) {
+    clearFlashSession();
+    return;
+  }
   const payload = {
     version: 1,
     words: flashWords.map(w => w.w),
@@ -1458,14 +1483,21 @@ function restoreFlashSession(expectedSource) {
     if (!payload || payload.version !== 1) return false;
     if (!payload.updatedAt || Date.now() - payload.updatedAt > FLASH_SESSION_TTL_MS) return false;
     if (expectedSource && payload.source && payload.source !== expectedSource) return false;
-    const words = (payload.words || []).map(word => WORD_BY_KEY.get(word)).filter(Boolean);
+    const restoredSource = payload.source || expectedSource || 'review';
+    const restoredUnknownOnly = Boolean(payload.unknownOnly);
+    let words = (payload.words || []).map(word => WORD_BY_KEY.get(word)).filter(Boolean);
+    if (restoredSource === 'review') {
+      words = restoredUnknownOnly
+        ? words.filter(w => unknownWords.has(w.w))
+        : words.filter(w => isDailyFlashCandidate(w));
+    }
     if (!words.length) return false;
     flashWords = words;
     flashIdx = Math.max(0, Math.min(Number(payload.idx) || 0, flashWords.length - 1));
     if (['browse', 'spell', 'choice'].includes(payload.mode)) practiceMode = payload.mode;
-    flashSourceMode = payload.source || 'review';
+    flashSourceMode = restoredSource;
     flashSourceCategory = payload.category || '';
-    unknownOnly = Boolean(payload.unknownOnly);
+    unknownOnly = restoredUnknownOnly;
     if (payload.quizScore && typeof payload.quizScore === 'object') {
       quizScore = {
         correct: Number(payload.quizScore.correct) || 0,
@@ -1544,36 +1576,25 @@ function getFlashSource(source = 'review', category = flashSourceCategory) {
   }
 
   const now = Date.now();
-  const dueUnknown = rankWordsForFlash(unknownPool).filter(w => isWordDue(w.w, now));
-  const learningPool = WORDS.filter(w => {
-    const status = getWordStatusLabel(w.w);
-    return status === 'learning' || status === 'familiar';
-  });
-  const dueLearning = rankWordsForFlash(learningPool).filter(w => isWordDue(w.w, now) && !unknownWords.has(w.w));
-
-  const combined = [];
-  const seen = new Set();
-  [...dueUnknown, ...dueLearning].forEach(w => {
-    if (!seen.has(w.w)) {
-      seen.add(w.w);
-      combined.push(w);
-    }
-  });
-
-  if (combined.length > 0) {
-    return combined.slice(0, DAILY_FLASH_TARGET);
-  }
-
-  const fallback = rankWordsForFlash(unknownPool.length > 0 ? unknownPool : WORDS.filter(w => getWordStatusLabel(w.w) !== 'mastered'));
-  if (fallback.length > 0) return fallback.slice(0, DAILY_FLASH_TARGET);
-
-  return rankWordsForFlash([...WORDS]).slice(0, DAILY_FLASH_TARGET);
+  const dueReview = rankWordsForFlash(WORDS.filter(w => {
+    const stats = getWordStats(w.w);
+    return hasReviewMemory(w.w, stats) && isDailyFlashCandidate(w, now);
+  }));
+  const newWords = rankWordsForFlash(WORDS.filter(w => {
+    const stats = getWordStats(w.w);
+    return !hasReviewMemory(w.w, stats) && !isMasteredForFlash(stats);
+  }));
+  return uniqueFlashWords([...dueReview, ...newWords]).slice(0, DAILY_FLASH_TARGET);
 }
 
 function flashRender(opts) {
   if (flashWords.length === 0) {
-    flashWords = getFlashSource(flashSourceMode);
+    flashWords = getFlashSource(flashSourceMode, flashSourceCategory);
     flashIdx = 0;
+  }
+  if (flashWords.length === 0) {
+    showBrowseComplete();
+    return;
   }
   const w = flashWords[flashIdx];
   if (!w) return;
@@ -1793,9 +1814,71 @@ function showQuizComplete() {
 
   document.getElementById('quiz-retry-btn').addEventListener('click', () => {
     quizScore = { correct: 0, total: 0 };
-    flashWords = getFlashSource(flashSourceMode);
+    flashWords = getFlashSource(flashSourceMode, flashSourceCategory);
     flashIdx = 0;
     flashRender({ autoSpeak: false });
+  });
+}
+
+function getBrowseCompleteCopy() {
+  if (flashSourceMode === 'category') {
+    const label = flashSourceCategory && CAT_LABELS[flashSourceCategory] ? CAT_LABELS[flashSourceCategory][1] : '这个分类';
+    return {
+      title: '这一类学完了',
+      detail: `${label} 的当前队列已经结束。`,
+      action: '再学一遍',
+    };
+  }
+  if (flashSourceMode === 'random') {
+    return {
+      title: '本轮练习完成',
+      detail: '这组随机词已经刷完。',
+      action: '重新生成',
+    };
+  }
+  return {
+    title: '今日学习完成',
+    detail: '当前到期词已经处理完。新词和复习词会按复习曲线继续出现。',
+    action: '刷新今日任务',
+  };
+}
+
+function showBrowseComplete() {
+  clearFlashSession();
+  const cardWrap = document.getElementById('flash-card-wrap');
+  const practiceArea = document.getElementById('practice-area');
+  const markRow = document.getElementById('flash-mark-row');
+  const content = document.getElementById('practice-content');
+  const feedback = document.getElementById('practice-feedback');
+  const progress = document.getElementById('flash-progress');
+  const counter = document.getElementById('flash-counter');
+  const taskMeta = document.getElementById('flash-task-meta');
+  if (!cardWrap || !practiceArea || !markRow || !content || !feedback) return;
+
+  const copy = getBrowseCompleteCopy();
+  cardWrap.style.display = 'none';
+  practiceArea.hidden = false;
+  markRow.style.display = 'none';
+  feedback.textContent = '';
+  if (progress) progress.textContent = '完成';
+  if (counter) counter.textContent = '完成';
+  if (taskMeta) taskMeta.textContent = copy.title;
+  content.innerHTML = `
+    <div class="quiz-complete">
+      <h3>${escapeHtml(copy.title)}</h3>
+      <div class="quiz-score">${escapeHtml(copy.detail)}</div>
+      <button class="quiz-retry-btn" id="browse-refresh-btn">${escapeHtml(copy.action)}</button>
+    </div>`;
+
+  document.getElementById('browse-refresh-btn').addEventListener('click', () => {
+    flashWords = getFlashSource(flashSourceMode, flashSourceCategory);
+    flashIdx = 0;
+    quizScore = { correct: 0, total: 0 };
+    if (flashWords.length > 0) {
+      flashRender({ autoSpeak: true });
+    } else {
+      showBrowseComplete();
+    }
   });
 }
 
@@ -1807,8 +1890,7 @@ function flashNext() {
     if (practiceMode !== 'browse') {
       showQuizComplete();
     } else {
-      flashIdx = 0;
-      flashRender({ autoSpeak: true });
+      showBrowseComplete();
     }
   }
 }
@@ -1907,10 +1989,38 @@ function showMarkedAnswer(w, known) {
   nextBtn.textContent = '下一个 Next';
   nextBtn.addEventListener('click', () => {
     stopSpeaking();
-    flashNext();
+    advanceAfterMarkedAnswer(w.w);
   });
 
   row.append(note, nextBtn);
+}
+
+function removeCurrentFlashWord(word) {
+  if (!flashWords.length) return;
+  const current = flashWords[flashIdx];
+  if (current && current.w === word) {
+    flashWords.splice(flashIdx, 1);
+  } else {
+    const index = flashWords.findIndex(w => w.w === word);
+    if (index === -1) return;
+    flashWords.splice(index, 1);
+    if (index < flashIdx) flashIdx--;
+  }
+  if (flashIdx >= flashWords.length) flashIdx = 0;
+  if (flashIdx < 0) flashIdx = 0;
+}
+
+function advanceAfterMarkedAnswer(word) {
+  removeCurrentFlashWord(word);
+  if (flashWords.length === 0 && flashSourceMode === 'review') {
+    flashWords = getFlashSource('review');
+    flashIdx = 0;
+  }
+  if (flashWords.length === 0) {
+    showBrowseComplete();
+    return;
+  }
+  flashRender({ autoSpeak: practiceMode === 'browse' && flashAutoSpeak });
 }
 
 function markWord(known) {
@@ -2227,7 +2337,7 @@ function setupEvents() {
   document.getElementById('flash-unknown-only-btn').addEventListener('click', () => {
     unknownOnly = !unknownOnly;
     updateUnknownOnlyBtn();
-    flashWords = getFlashSource(flashSourceMode);
+    flashWords = getFlashSource(flashSourceMode, flashSourceCategory);
     flashIdx = 0;
     if (flashWords.length === 0) {
       flashWords = [...WORDS];
